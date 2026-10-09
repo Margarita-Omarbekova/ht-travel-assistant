@@ -51,6 +51,36 @@ async def telegram_send_message(chat_id: int, text: str) -> None:
         response.raise_for_status()
 
 
+async def transcribe_telegram_voice(file_id: str) -> str:
+    async with httpx.AsyncClient(timeout=90) as client:
+        file_response = await client.get(
+            f"{TELEGRAM_API}/getFile",
+            params={"file_id": file_id},
+        )
+        file_response.raise_for_status()
+        file_path = file_response.json()["result"]["file_path"]
+
+        audio_response = await client.get(
+            f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
+        )
+        audio_response.raise_for_status()
+
+        transcription_response = await client.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            data={"model": "gpt-4o-mini-transcribe"},
+            files={
+                "file": (
+                    "voice.ogg",
+                    audio_response.content,
+                    "audio/ogg",
+                )
+            },
+        )
+        transcription_response.raise_for_status()
+        return transcription_response.json().get("text", "").strip()
+
+
 def extract_openai_text(data: Dict[str, Any]) -> str:
     for item in data.get("output", []):
         for part in item.get("content", []):
@@ -115,8 +145,30 @@ async def telegram_webhook(
     chat = message.get("chat") or {}
     chat_id = chat.get("id")
     text = (message.get("text") or "").strip()
+    voice = message.get("voice") or {}
 
-    if not chat_id or not text:
+    if not chat_id:
+        return {"ok": True}
+
+    if not text and voice.get("file_id"):
+        try:
+            text = await transcribe_telegram_voice(voice["file_id"])
+        except httpx.HTTPStatusError as e:
+            print("Voice transcription HTTP error:", e.response.status_code, e.response.text)
+            await telegram_send_message(
+                chat_id,
+                "Не получилось распознать голосовое сообщение. Попробуй отправить ещё раз или напиши текстом.",
+            )
+            return {"ok": True}
+        except Exception as e:
+            print("Voice transcription error:", repr(e))
+            await telegram_send_message(
+                chat_id,
+                "Не получилось распознать голосовое сообщение. Попробуй отправить ещё раз или напиши текстом.",
+            )
+            return {"ok": True}
+
+    if not text:
         return {"ok": True}
 
     if text.startswith("/start"):
