@@ -10,7 +10,8 @@
 2. docs/TRAVEL_PROFILE.md
 3. docs/ARCHITECTURE.md
 4. docs/DATA_SOURCE_DB_HT.md
-5. README.md
+5. docs/DVHT_CODEX_CONTEXT.md
+6. README.md
 
 ## Текущее состояние
 
